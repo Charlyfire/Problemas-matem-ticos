@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Aventura de Números - Cazamisterios</title>
+    <meta name="description" content="Juego interactivo para practicar problemas de cambio y comparación con apoyo visual y narración en español.">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Andika&family=Fredoka+One&display=swap" rel="stylesheet">
@@ -144,6 +145,48 @@
             #answerInput { height: 55px; width: 75px; font-size: 1.8rem; }
         }
 
+        .status-message {
+            min-height: 1.75rem;
+            text-align: center;
+            font-weight: bold;
+            color: #1d4ed8;
+        }
+
+        .kid-hint {
+            min-height: 1.5rem;
+            text-align: center;
+            font-size: 0.95rem;
+            color: #7c3aed;
+            font-weight: 700;
+        }
+
+        body.kid-mode #checkBtn,
+        body.kid-mode #nextBtn {
+            display: none;
+        }
+
+        body.kid-mode #problemText {
+            font-size: clamp(1.5rem, 3.8vw, 2.25rem) !important;
+            line-height: 1.25;
+        }
+
+        body.kid-mode #answerInput {
+            width: 125px;
+            height: 88px;
+            font-size: 3rem;
+        }
+
+        body.kid-mode .numpad-container {
+            max-width: 430px;
+            gap: 0.95rem;
+        }
+
+        body.kid-mode .n-key {
+            font-size: 2.4rem;
+            min-height: 86px;
+            border-radius: 22px;
+        }
+
         .config-label {
             @apply flex items-center p-2 bg-white border-2 border-gray-100 rounded-xl cursor-pointer hover:border-yellow-400 hover:bg-yellow-50 transition-all text-[11px] leading-tight text-left;
         }
@@ -151,7 +194,7 @@
         .config-label b { @apply text-blue-600 block mb-0.5; }
     </style>
 </head>
-<body class="p-0 sm:p-2">
+<body class="p-0 sm:p-2 kid-mode">
 
     <button id="exitCinemaBtn" class="hidden fixed top-4 right-4 z-[100] bg-red-500 text-white px-6 py-3 rounded-full font-bold btn-bubble shadow-2xl text-lg">
         VOLVER 🔙
@@ -166,9 +209,9 @@
             </div>
         </div>
         <div class="flex gap-2">
-            <button id="fullscreenToggle" class="bg-white/20 border-2 border-sky-300 p-2 rounded-xl btn-bubble text-xl">📺</button>
-            <button id="configToggle" class="bg-white/20 border-2 border-yellow-300 p-2 rounded-xl btn-bubble text-xl">⚙️</button>
-            <button id="exitBtn" class="bg-white/20 border-2 border-red-300 p-2 rounded-xl btn-bubble text-xl">❌</button>
+            <button id="fullscreenToggle" aria-label="Activar o salir del modo cine" class="bg-white/20 border-2 border-sky-300 p-2 rounded-xl btn-bubble text-xl" title="Mantén pulsado para adultos">📺</button>
+            <button id="configToggle" aria-label="Abrir ajustes pedagógicos" class="bg-white/20 border-2 border-yellow-300 p-2 rounded-xl btn-bubble text-xl" title="Mantén pulsado para adultos">⚙️</button>
+            <button id="exitBtn" aria-label="Finalizar partida" class="bg-white/20 border-2 border-red-300 p-2 rounded-xl btn-bubble text-xl" title="Mantén pulsado para adultos">❌</button>
         </div>
     </header>
 
@@ -225,13 +268,16 @@
                 <p id="problemText" class="text-lg md:text-2xl font-bold text-gray-800 leading-tight flex-1 text-center">
                     Preparando pistas...
                 </p>
-                <button id="speakBtn" class="bg-yellow-400 p-4 rounded-full text-3xl shadow-md border-2 border-white btn-bubble flex-shrink-0">📢</button>
+                <button id="speakBtn" aria-label="Repetir en voz alta el enunciado" class="bg-yellow-400 p-4 rounded-full text-3xl shadow-md border-2 border-white btn-bubble flex-shrink-0">📢</button>
             </div>
 
             <div class="flex justify-center items-center gap-4">
-                <input type="number" id="answerInput" placeholder="?">
+                <input type="number" id="answerInput" placeholder="?" readonly aria-label="Respuesta numérica">
                 <button id="checkBtn" class="bg-green-500 text-white font-bold h-[65px] px-8 rounded-2xl shadow-lg text-2xl btn-bubble border-b-6 border-green-700">¡LISTO!</button>
             </div>
+
+            <p id="statusMessage" class="status-message" aria-live="polite"></p>
+            <p id="kidHint" class="kid-hint" aria-live="polite"></p>
             
             <div class="numpad-container">
                 <button class="n-key">1</button><button class="n-key">2</button><button class="n-key">3</button>
@@ -250,9 +296,19 @@
         const nombres = ["Hugo", "Sofía", "Lucas", "Elena", "Mateo", "Pilar", "Dani", "Martina", "Leo", "Carla", "Espe", "Laura"];
         const temas = { colegio: { items: ["caramelos", "cromos", "pegatinas", "balones"], icons: ["🍬", "🃏", "⭐", "⚽"] } };
         const frasesAcierto = ["¡Bien!", "¡Enhorabuena!", "¡Fenomenal!", "¡Genio!", "¡Perfecto!", "¡Increíble!"];
+        const KID_MODE = true;
 
         let currentProblem = { type: '', result: 0, fullText: '' };
+        const STORAGE_KEY = 'cazamisterios-config-v1';
         const config = { max: 10, types: ['C1', 'C2'], theme: 'colegio' };
+        let idleSpeechTimer = null;
+        let autoCheckTimer = null;
+
+        function randomInt(min, max) {
+            const floorMin = Math.ceil(min);
+            const floorMax = Math.floor(max);
+            return Math.floor(Math.random() * (floorMax - floorMin + 1)) + floorMin;
+        }
 
         const elements = {
             problemText: document.getElementById('problemText'),
@@ -261,90 +317,130 @@
             configPanel: document.getElementById('configPanel'),
             exitScreen: document.getElementById('exitScreen'),
             gameCard: document.getElementById('gameCard'),
-            exitCinemaBtn: document.getElementById('exitCinemaBtn')
+            exitCinemaBtn: document.getElementById('exitCinemaBtn'),
+            statusMessage: document.getElementById('statusMessage'),
+            kidHint: document.getElementById('kidHint')
         };
 
+        function setStatus(message, tone = 'info') {
+            const colors = { info: '#1d4ed8', success: '#15803d', error: '#b91c1c' };
+            elements.statusMessage.style.color = colors[tone] || colors.info;
+            elements.statusMessage.innerText = message;
+        }
+
+        function saveConfig() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+        }
+
+        function setKidHint(message) {
+            elements.kidHint.innerText = message;
+        }
+
+        function scheduleReminder() {
+            clearTimeout(idleSpeechTimer);
+            idleSpeechTimer = setTimeout(() => {
+                decir('Si quieres, toca el altavoz y te repito el juego.');
+                setStatus('¿Necesitas ayuda? Pulsa el altavoz 📢', 'info');
+            }, 12000);
+        }
+
+        function clearAutoCheck() {
+            clearTimeout(autoCheckTimer);
+            autoCheckTimer = null;
+        }
+
+        function loadConfig() {
+            try {
+                const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+                if (!saved) return;
+                if (Number.isInteger(saved.max) && saved.max >= 5 && saved.max <= 30) config.max = saved.max;
+                if (Array.isArray(saved.types) && saved.types.length) config.types = saved.types;
+            } catch (_) {}
+        }
+
         function decir(texto) {
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel();
-                const utterance = new SpeechSynthesisUtterance(texto);
-                utterance.lang = 'es-ES';
-                utterance.rate = 0.85;
-                utterance.pitch = 1.2; 
-                window.speechSynthesis.speak(utterance);
+            if (!('speechSynthesis' in window)) {
+                setStatus('Tu navegador no admite narración de voz.', 'error');
+                return;
             }
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(texto);
+            utterance.lang = 'es-ES';
+            utterance.rate = 0.85;
+            utterance.pitch = 1.2;
+            window.speechSynthesis.speak(utterance);
         }
 
         function generateProblem() {
-            const type = config.types[Math.floor(Math.random() * config.types.length)];
+            const type = config.types[randomInt(0, config.types.length - 1)];
             const theme = temas.colegio;
-            const idx = Math.floor(Math.random() * theme.items.length);
+            const idx = randomInt(0, theme.items.length - 1);
             const item = theme.items[idx];
             const icon = theme.icons[idx];
-            const p1 = nombres[Math.floor(Math.random() * nombres.length)];
-            let p2 = nombres[Math.floor(Math.random() * nombres.length)];
-            while(p1 === p2) p2 = nombres[Math.floor(Math.random() * nombres.length)];
+            const p1 = nombres[randomInt(0, nombres.length - 1)];
+            let p2 = nombres[randomInt(0, nombres.length - 1)];
+            while(p1 === p2) p2 = nombres[randomInt(0, nombres.length - 1)];
 
             let n1, n2, diff, text, visualData = [];
 
             // Lógica unificada para Cambio y Comparación
             if (type === 'C1') {
-                n1 = Math.floor(Math.random() * (config.max - 1)) + 1;
-                diff = Math.floor(Math.random() * (config.max - n1)) + 1;
+                n1 = randomInt(1, config.max - 1);
+                diff = randomInt(1, config.max - n1);
                 currentProblem.result = n1 + diff;
                 text = `${p1} tenía ${n1} ${item}. Le regalaron ${diff} más. ¿Cuántos tiene ahora?`;
                 visualData = [{icon, n: n1, label: p1}];
             } else if (type === 'C2') {
-                n1 = Math.floor(Math.random() * (config.max - 1)) + 2;
-                diff = Math.floor(Math.random() * (n1 - 1)) + 1;
+                n1 = randomInt(2, config.max);
+                diff = randomInt(1, n1 - 1);
                 currentProblem.result = n1 - diff;
                 text = `${p1} tenía ${n1} ${item}. Perdió ${diff} jugando. ¿Cuántos le quedan?`;
                 visualData = [{icon, n: n1, label: p1}];
             } else if (type === 'C3') {
-                n1 = Math.floor(Math.random() * (config.max - 2)) + 1;
-                let nFinal = Math.floor(Math.random() * (config.max - n1 - 1)) + n1 + 1;
+                n1 = randomInt(1, config.max - 2);
+                let nFinal = randomInt(n1 + 1, config.max);
                 currentProblem.result = nFinal - n1;
                 text = `${p1} tenía ${n1} ${item}. Al final del día tiene ${nFinal}. ¿Cuántos ha ganado hoy?`;
                 visualData = [{icon, n: n1, label: p1}];
             } else if (type === 'C4') {
-                n1 = Math.floor(Math.random() * (config.max - 2)) + 3;
-                let nFinal = Math.floor(Math.random() * (n1 - 2)) + 1;
+                n1 = randomInt(3, config.max);
+                let nFinal = randomInt(1, n1 - 2);
                 currentProblem.result = n1 - nFinal;
                 text = `${p1} tenía ${n1} ${item}. Ahora solo tiene ${nFinal}. ¿Cuántos ha perdido?`;
                 visualData = [{icon, n: n1, label: p1}];
             } else if (type === 'C5') {
-                diff = Math.floor(Math.random() * (config.max - 2)) + 1;
-                let nFinal = Math.floor(Math.random() * (config.max - diff - 1)) + diff + 1;
+                diff = randomInt(1, config.max - 2);
+                let nFinal = randomInt(diff + 1, config.max);
                 currentProblem.result = nFinal - diff;
                 text = `${p1} tenía unos cuantos ${item}. Ganó ${diff} jugando y ahora tiene ${nFinal}. ¿Cuántos tenía al principio?`;
                 visualData = [{icon, n: nFinal, label: p1}];
             } else if (type === 'C6') {
-                diff = Math.floor(Math.random() * (config.max / 2)) + 1;
-                let nFinal = Math.floor(Math.random() * (config.max / 2)) + 1;
+                diff = randomInt(1, Math.floor(config.max / 2));
+                let nFinal = randomInt(1, Math.floor(config.max / 2));
                 currentProblem.result = nFinal + diff;
                 text = `${p1} tenía varios ${item}. Perdió ${diff} en el patio y ahora le quedan ${nFinal}. ¿Cuántos tenía antes de perderlos?`;
                 visualData = [{icon, n: nFinal, label: p1}];
             } else if (type === 'CP1') {
-                n1 = Math.floor(Math.random() * (config.max - 2)) + 1;
-                n2 = Math.floor(Math.random() * (config.max - n1 - 1)) + n1 + 1;
+                n1 = randomInt(1, config.max - 2);
+                n2 = randomInt(n1 + 1, config.max);
                 currentProblem.result = n2 - n1;
                 text = `${p1} tiene ${n1} ${item}. ${p2} tiene ${n2} ${item}. ¿Cuántos tiene ${p2} MÁS que ${p1}?`;
                 visualData = [{icon, n: n1, label: p1}, {icon, n: n2, label: p2}];
             } else if (type === 'CP2') {
-                n1 = Math.floor(Math.random() * (config.max - 2)) + 1;
-                n2 = Math.floor(Math.random() * (config.max - n1 - 1)) + n1 + 1;
+                n1 = randomInt(1, config.max - 2);
+                n2 = randomInt(n1 + 1, config.max);
                 currentProblem.result = n2 - n1;
                 text = `${p1} tiene ${n1} ${item}. ${p2} tiene ${n2} ${item}. ¿Cuántos tiene ${p1} MENOS que ${p2}?`;
                 visualData = [{icon, n: n1, label: p1}, {icon, n: n2, label: p2}];
             } else if (type === 'CP3') {
-                n1 = Math.floor(Math.random() * (config.max / 2)) + 1;
-                diff = Math.floor(Math.random() * (config.max - n1 - 1)) + 1;
+                n1 = randomInt(1, Math.floor(config.max / 2));
+                diff = randomInt(1, config.max - n1 - 1);
                 currentProblem.result = n1 + diff;
                 text = `${p1} tiene ${n1} ${item}. ${p2} tiene ${diff} MÁS que ${p1}. ¿Cuántos tiene ${p2}?`;
                 visualData = [{icon, n: n1, label: p1}];
             } else if (type === 'CP4') {
-                n2 = Math.floor(Math.random() * (config.max - 2)) + 3;
-                diff = Math.floor(Math.random() * (n2 - 1)) + 1;
+                n2 = randomInt(3, config.max);
+                diff = randomInt(1, n2 - 1);
                 currentProblem.result = n2 - diff;
                 text = `${p2} tiene ${n2} ${item}. ${p1} tiene ${diff} MENOS que ${p2}. ¿Cuántos tiene ${p1}?`;
                 visualData = [{icon, n: n2, label: p2}];
@@ -353,6 +449,10 @@
             elements.problemText.innerText = text;
             currentProblem.fullText = text;
             elements.answerInput.value = '';
+            setStatus('Escucha y toca los números grandes.', 'info');
+            setKidHint('👆 Toca números y se corrige solo.');
+            clearAutoCheck();
+            scheduleReminder();
             
             elements.visualAid.innerHTML = '';
             visualData.forEach(set => {
@@ -377,19 +477,79 @@
             decir(text);
         }
 
+        function expectedLength() {
+            return String(currentProblem.result).length;
+        }
+
+        function queueAutoCheck() {
+            clearAutoCheck();
+            if (!KID_MODE) return;
+            if (elements.answerInput.value.length >= expectedLength()) {
+                autoCheckTimer = setTimeout(checkAnswer, 350);
+            }
+        }
+
+        function appendDigit(digit) {
+            const maxLen = Math.max(2, expectedLength());
+            if (elements.answerInput.value.length >= maxLen) return;
+            elements.answerInput.value += digit;
+            scheduleReminder();
+            queueAutoCheck();
+        }
+
         function checkAnswer() {
             const userVal = parseInt(elements.answerInput.value);
             if (isNaN(userVal)) return;
             if (userVal === currentProblem.result) {
-                decir(frasesAcierto[Math.floor(Math.random() * frasesAcierto.length)]);
+                const praise = frasesAcierto[randomInt(0, frasesAcierto.length - 1)];
+                setStatus(`${praise} 🎉`, 'success');
+                setKidHint('⭐ ¡Súper! Preparando el siguiente...');
+                decir(praise);
                 confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
                 setTimeout(generateProblem, 2500);
             } else {
-                decir("¡Inténtalo de nuevo!");
+                setStatus('No pasa nada, vuelve a intentarlo 💪', 'error');
+                setKidHint('🧸 Mira los dibujitos y prueba otra vez.');
+                decir('¡Inténtalo de nuevo!');
                 elements.answerInput.value = '';
                 elements.gameCard.style.animation = 'shake 0.5s';
                 setTimeout(() => elements.gameCard.style.animation = '', 500);
+                scheduleReminder();
             }
+        }
+
+        function lockForAdults(button, action) {
+            if (!KID_MODE) {
+                button.onclick = action;
+                return;
+            }
+
+            let holdTimer = null;
+            let activated = false;
+
+            const start = () => {
+                activated = false;
+                clearTimeout(holdTimer);
+                setKidHint('🔒 Solo adultos: mantén pulsado...');
+                holdTimer = setTimeout(() => {
+                    activated = true;
+                    setKidHint('✅ Acceso de adulto activado.');
+                    action();
+                }, 1200);
+            };
+
+            const cancel = () => {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+                if (!activated) {
+                    setKidHint('🎯 Escucha y toca números. ¡Yo te ayudo!');
+                }
+            };
+
+            button.addEventListener('pointerdown', start);
+            button.addEventListener('pointerup', cancel);
+            button.addEventListener('pointerleave', cancel);
+            button.addEventListener('pointercancel', cancel);
         }
 
         const style = document.createElement('style');
@@ -399,32 +559,76 @@
         document.getElementById('speakBtn').onclick = () => decir(currentProblem.fullText);
         document.getElementById('nextBtn').onclick = generateProblem;
         document.getElementById('checkBtn').onclick = checkAnswer;
-        document.getElementById('fullscreenToggle').onclick = () => { document.body.classList.toggle('is-cinema-mode'); elements.exitCinemaBtn.classList.toggle('hidden'); };
+        lockForAdults(document.getElementById('fullscreenToggle'), () => {
+            document.body.classList.toggle('is-cinema-mode');
+            elements.exitCinemaBtn.classList.toggle('hidden');
+        });
         document.getElementById('exitCinemaBtn').onclick = () => { document.body.classList.remove('is-cinema-mode'); elements.exitCinemaBtn.classList.add('hidden'); };
-        document.getElementById('exitBtn').onclick = () => elements.exitScreen.classList.remove('hidden');
+        lockForAdults(document.getElementById('exitBtn'), () => elements.exitScreen.classList.remove('hidden'));
         document.getElementById('restartBtn').onclick = () => { elements.exitScreen.classList.add('hidden'); generateProblem(); };
         
         document.querySelectorAll('.n-key').forEach(btn => {
             btn.onclick = () => {
                 if (btn.classList.contains('special')) return;
-                if(elements.answerInput.value.length < 2) elements.answerInput.value += btn.innerText;
+                appendDigit(btn.innerText);
             };
         });
-        document.getElementById('keyClear').onclick = () => elements.answerInput.value = '';
-        document.getElementById('keyDel').onclick = () => elements.answerInput.value = elements.answerInput.value.slice(0, -1);
-        document.getElementById('configToggle').onclick = () => elements.configPanel.classList.toggle('hidden');
+        document.getElementById('keyClear').onclick = () => {
+            elements.answerInput.value = '';
+            clearAutoCheck();
+            scheduleReminder();
+        };
+        document.getElementById('keyDel').onclick = () => {
+            elements.answerInput.value = elements.answerInput.value.slice(0, -1);
+            clearAutoCheck();
+            scheduleReminder();
+        };
+        lockForAdults(document.getElementById('configToggle'), () => elements.configPanel.classList.toggle('hidden'));
         document.getElementById('rangeMax').oninput = (e) => {
             config.max = parseInt(e.target.value);
             document.getElementById('rangeLabel').innerText = config.max;
+            saveConfig();
         };
         document.getElementById('closeConfig').onclick = () => {
             const checked = Array.from(document.querySelectorAll('#configPanel input[type="checkbox"]:checked')).map(el => el.value);
             if (checked.length > 0) config.types = checked;
+            saveConfig();
             elements.configPanel.classList.add('hidden');
             generateProblem();
         };
 
-        window.onload = generateProblem;
+        document.addEventListener('keydown', (event) => {
+            if (elements.configPanel && !elements.configPanel.classList.contains('hidden')) return;
+            if (/^[0-9]$/.test(event.key)) {
+                appendDigit(event.key);
+            } else if (event.key === 'Backspace') {
+                elements.answerInput.value = elements.answerInput.value.slice(0, -1);
+                clearAutoCheck();
+            } else if (event.key === 'Enter') {
+                checkAnswer();
+            }
+        });
+
+        window.onload = () => {
+            loadConfig();
+            if (KID_MODE) {
+                config.max = Math.min(config.max, 10);
+                config.types = ['C1', 'C2'];
+                saveConfig();
+                setStatus('Modo peque activo ✅', 'success');
+                setKidHint('🎯 Escucha y toca números. ¡Yo te ayudo!');
+            }
+            document.getElementById('rangeMax').value = config.max;
+            document.getElementById('rangeLabel').innerText = config.max;
+            const checkboxes = document.querySelectorAll('#configPanel input[type="checkbox"]');
+            checkboxes.forEach((cb) => {
+                cb.checked = config.types.includes(cb.value);
+            });
+            generateProblem();
+            setTimeout(() => {
+                decir('Hola, detective. Toca los números grandes y yo reviso tu respuesta.');
+            }, 600);
+        };
     </script>
 </body>
 </html>
